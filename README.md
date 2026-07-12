@@ -3,6 +3,7 @@
 [![CI](https://github.com/SuperInstance/plato-engine-block-elixir/actions/workflows/ci.yml/badge.svg)](https://github.com/SuperInstance/plato-engine-block-elixir/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
+> **Plato Engine Block — a sub-400-line room runtime for agent-space interaction.**  
 > **"The BEAM VM's actor model IS the Plato thesis."**
 
 This is the Elixir/OTP implementation of the Plato room runtime — a fault-tolerant marine vessel monitoring system where every room is an isolated, supervised process, ternary logic is expressed through pattern matching, and the entire fleet is a supervision tree.
@@ -425,6 +426,26 @@ On a boat, you can't just stop monitoring to deploy new alarm logic. The BEAM su
 - Protocol execution against running rooms
 - Process isolation between rooms
 - Packed ternary across fleet
+
+## PLATO Engine Block Family
+
+This is the Elixir/OTP implementation of the Plato Engine Block. The complete family:
+
+| Implementation | Language | Repo | Focus |
+|---|---|---|---|
+| **Elixir/OTP** ← you are here | Elixir | [plato-engine-block-elixir](https://github.com/SuperInstance/plato-engine-block-elixir) | BEAM supervision trees, fault tolerance, hot reload |
+| **C Reference** | C99 | [plato-engine-block-c](https://github.com/SuperInstance/plato-engine-block-c) | Embedded, bare-metal, zero heap alloc |
+| **Rust (Original)** | Rust | [plato-engine-block](https://github.com/SuperInstance/plato-engine-block) | `no_std` + alloc, builder pattern, tokio server |
+| **Zig** | Zig | [plato-engine-block-zig](https://github.com/SuperInstance/plato-engine-block-zig) | Comptime ternary packing, cross-compile |
+| **Python Core** | Python | [plato-core](https://github.com/SuperInstance/plato-core) | Foundation types, mesh registry, training tiles |
+| **Runtime Kernel** | Rust | [plato-runtime-kernel](https://github.com/SuperInstance/plato-runtime-kernel) | Spatial model: tensor grid, batons, assertion traps |
+| **Server** | Python | [plato-server](https://github.com/SuperInstance/plato-server) | Knowledge tiles, fleet sync via Matrix, HTTP API |
+
+**Specs & Guides:**
+- 📜 [PLATO Wire Protocol](https://github.com/SuperInstance/AI-Writings/blob/main/PLATO_WIRE_PROTOCOL.md)
+- 📖 [PLATO Master Guide](https://github.com/SuperInstance/AI-Writings/blob/main/PLATO_MASTER_GUIDE.md)
+- 🗺️ [PLATO Ecosystem Map](https://github.com/SuperInstance/AI-Writings/blob/main/PLATO_ECOSYSTEM_MAP.md)
+
 
 ## Comparison with Rust Implementation
 
