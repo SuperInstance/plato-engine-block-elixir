@@ -34,7 +34,7 @@ defmodule Plato.Room do
   alias Plato.{Sensor, Alarm, Ternary}
 
   @default_history_size 50
-  @default_alarm_cooldown 5
+  @default_alarm_cooldown 30  # seconds per spec
 
   # --- Client API ---
 
@@ -73,6 +73,14 @@ defmodule Plato.Room do
   end
   def add_alarm(room, %Alarm{} = alarm) do
     GenServer.call(room, {:add_alarm, alarm})
+  end
+
+  @doc "Set an alarm rule at runtime (alarm set command)"
+  def set_alarm(room, %{id: id, condition: condition, cooldown: cooldown}) when is_binary(room) do
+    GenServer.call(via_tuple(room), {:set_alarm, %{id: id, condition: condition, cooldown: cooldown}})
+  end
+  def set_alarm(room, %{id: id, condition: condition, cooldown: cooldown}) do
+    GenServer.call(room, {:set_alarm, %{id: id, condition: condition, cooldown: cooldown}})
   end
 
   @doc "Get current room status"
@@ -159,6 +167,17 @@ defmodule Plato.Room do
     {:reply, :ok, %{state | alarms: [alarm | state.alarms]}}
   end
 
+  def handle_call({:set_alarm, %{id: id, condition: condition_str, cooldown: cooldown}}, _from, state) do
+    # Parse condition string like "coolant_temp_c > 95"
+    case parse_alarm_condition(condition_str) do
+      {:ok, sensor, op, threshold} ->
+        alarm = Alarm.new(id, sensor, op, threshold, cooldown: cooldown)
+        {:reply, {:ok, id}, %{state | alarms: [alarm | state.alarms]}}
+      :error ->
+        {:reply, {:error, "invalid condition format"}, state}
+    end
+  end
+
   def handle_call(:get_status, _from, state) do
     status = %{
       name: state.name,
@@ -171,8 +190,17 @@ defmodule Plato.Room do
   end
 
   def handle_call(:get_alarms, _from, state) do
-    alarm_names = Map.keys(state.active_alarms)
-    {:reply, {:alarms, alarm_names}, state}
+    # Return full alarm structs for spec-compliant JSON serialization
+    alarms = Enum.map(state.alarms, fn alarm ->
+      %{
+        id: alarm.name,
+        condition: "#{alarm.sensor} #{Plato.Alarm.condition_to_string(alarm.condition)} #{format_threshold(alarm.threshold)}",
+        cooldown_sec: alarm.cooldown,
+        last_triggered: alarm.last_triggered,
+        state: (if Map.has_key?(state.active_alarms, alarm.name), do: "active", else: "idle")
+      }
+    end)
+    {:reply, {:alarms, alarms}, state}
   end
 
   def handle_call({:get_history, n}, _from, state) do
@@ -208,12 +236,22 @@ defmodule Plato.Room do
     # Evaluate all alarms
     {new_active, fired} = evaluate_alarms(state)
 
-    # Record history snapshot
+    # Update last_triggered on fired alarms
+    now = :erlang.system_time(:second) * 1.0
+    alarms_updated = Enum.map(state.alarms, fn alarm ->
+      if alarm.name in fired do
+        %{alarm | last_triggered: now}
+      else
+        alarm
+      end
+    end)
+
+    # Record history snapshot with timestamp
     snapshot = build_snapshot(state)
     history = [snapshot | state.history] |> Enum.take(state.history_size)
 
-    # Decay cooldowns
-    decayed = decay_cooldowns(state.active_alarms)
+    # Decay cooldowns from the evaluated state
+    decayed = decay_cooldowns(new_active)
 
     # Merge: newly fired alarms get fresh cooldown
     final_active = Enum.reduce(fired, decayed, fn name, acc ->
@@ -223,29 +261,49 @@ defmodule Plato.Room do
 
     %{state |
       tick_count: state.tick_count + 1,
+      alarms: alarms_updated,
       history: history,
       active_alarms: final_active
     }
   end
 
   defp evaluate_alarms(state) do
+    # First: clear alarms whose conditions are no longer met
+    cleared = Enum.reduce(state.active_alarms, state.active_alarms, fn {name, _cd}, acc ->
+      alarm = Enum.find(state.alarms, &(&1.name == name))
+      if alarm do
+        sensor = Map.get(state.sensors, alarm.sensor)
+        if sensor do
+          case Alarm.evaluate(alarm, sensor.value) do
+            {:fire, _} -> acc  # Still triggered, keep in active
+            :ok -> Map.delete(acc, name)  # Condition cleared, remove
+          end
+        else
+          acc
+        end
+      else
+        acc
+      end
+    end)
+
+    # Then: find newly fired alarms (not already in cleared active set)
     fired =
       for alarm <- state.alarms,
           sensor = Map.get(state.sensors, alarm.sensor),
           sensor != nil,
           eval = Alarm.evaluate(alarm, sensor.value),
           match?({:fire, _}, eval),
-          not Map.has_key?(state.active_alarms, alarm.name) do
+          not Map.has_key?(cleared, alarm.name) do
         alarm.name
       end
 
-    {state.active_alarms, fired}
+    {cleared, fired}
   end
 
   defp build_snapshot(state) do
     sensors = Map.new(state.sensors, fn {name, s} -> {name, s.value} end)
     actuators = Map.merge(%{}, state.actuators)
-    %{tick: state.tick_count, sensors: sensors, actuators: actuators}
+    %{tick: state.tick_count, t: :erlang.system_time(:second) * 1.0, sensors: sensors, actuators: actuators}
   end
 
   defp decay_cooldowns(active) do
@@ -261,4 +319,23 @@ defmodule Plato.Room do
       nil -> state.alarm_cooldown
     end
   end
+
+  defp parse_alarm_condition(str) do
+    # Parse "sensor_name op threshold" e.g. "coolant_temp_c > 95"
+    case String.split(str, ~r/\s+/, parts: 3) do
+      [sensor, op_str, threshold_str] ->
+        case Alarm.parse_condition(op_str) do
+          {:ok, op} ->
+            case Float.parse(threshold_str) do
+              {threshold, _} -> {:ok, sensor, op, threshold}
+              :error -> :error
+            end
+          :error -> :error
+        end
+      _ -> :error
+    end
+  end
+
+  defp format_threshold({low, high}), do: "#{low},#{high}"
+  defp format_threshold(v), do: "#{v}"
 end

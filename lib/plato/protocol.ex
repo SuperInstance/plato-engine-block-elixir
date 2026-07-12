@@ -71,14 +71,35 @@ defmodule Plato.Protocol do
   # alarm list
   defp do_parse(["alarm", "list"]), do: {:alarm_list, %{}}
 
-  # alarm set <id> <condition> <cooldown>
+  # alarm set <id> <sensor> <op> <threshold> <cooldown>
+  # e.g. "alarm set low_rpm rpm < 1500 60"
   defp do_parse(["alarm", "set", id | rest]) do
     case rest do
+      [sensor, op, threshold_str, cooldown_str] ->
+        # Validate operator
+        case Plato.Alarm.parse_condition(op) do
+          {:ok, _cond} ->
+            case Float.parse(threshold_str) do
+              {threshold, _} ->
+                case Integer.parse(cooldown_str) do
+                  {cd, _} ->
+                    condition_str = "#{sensor} #{op} #{threshold}"
+                    {:alarm_set, %{id: id, condition: condition_str, cooldown: cd}}
+                  _ ->
+                    {:unknown, "invalid cooldown"}
+                end
+              :error ->
+                {:unknown, "invalid threshold"}
+            end
+          :error ->
+            {:unknown, "invalid condition operator '#{op}'"}
+        end
+      # Legacy: "alarm set <id> <condition> <cooldown>" where condition is pre-formatted
       [condition, cooldown] ->
         {cd, _} = Integer.parse(cooldown)
         {:alarm_set, %{id: id, condition: condition, cooldown: cd}}
       _ ->
-        {:unknown, "usage: alarm set <id> <condition> <cooldown>"}
+        {:unknown, "usage: alarm set <id> <sensor> <op> <threshold> <cooldown>"}
     end
   end
 
@@ -110,21 +131,19 @@ defmodule Plato.Protocol do
   @doc """
   Format a command response as a JSON string per PLATO Wire Protocol v0.1.
 
-  ## Examples
-
-      iex> Plato.Protocol.format_response({:ok, "tick taken"})
-      ~s({"type":"ack","message":"tick taken"})
-
-      iex> Plato.Protocol.format_response({:error, "bad command"})
-      ~s({"type":"error","message":"bad command"})
+  All responses include real Unix timestamps.
   """
   @spec format_response(term()) :: String.t()
   def format_response({:ok, %{tick: tick_num, sensors: sensors}}) when is_map(sensors) do
-    # Tick response with sensor data
+    # Tick response with sensor data and real Unix timestamp
     data = sensors
     |> Enum.map(fn {k, v} -> ~s("#{k}":#{format_float(v)}) end)
     |> Enum.join(",")
-    ~s({"type":"tick","t":#{:os.system_time(:second)}.0,"seq":#{tick_num},"data":{#{data}}})
+    ~s({"type":"tick","t":#{unix_timestamp()},"seq":#{tick_num},"data":{#{data}}})
+  end
+
+  def format_response({:ok, %{tick: tick_num}}) do
+    ~s({"type":"ack","message":"tick #{tick_num}"})
   end
 
   def format_response({:ok, message}) when is_binary(message) do
@@ -149,17 +168,31 @@ defmodule Plato.Protocol do
       data_str = data
       |> Enum.map(fn {k, v} -> ~s("#{k}":#{format_float(v)}) end)
       |> Enum.join(",")
-      ~s({"t":0.0,"seq":#{Map.get(entry, :tick, 0)},"data":{#{data_str}}})
+      # Real Unix timestamps from entry, or fall back to sequence-based estimate
+      t = Map.get(entry, :t, unix_timestamp())
+      ~s({"t":#{format_float(t)},"seq":#{Map.get(entry, :tick, 0)},"data":{#{data_str}}})
     end)
     |> Enum.join(",")
     ~s({"type":"history","count":#{length(entries)},"ticks":[#{ticks}]})
   end
 
   def format_response({:alarms, alarms}) when is_list(alarms) do
+    # Full spec-compliant alarm_list with condition, cooldown_sec, last_triggered
     alarm_json = alarms
-    |> Enum.map(fn name -> ~s({"id":"#{name}","state":"active"}) end)
+    |> Enum.map(fn alarm ->
+      cond_str = Map.get(alarm, :condition, "")
+      cooldown = Map.get(alarm, :cooldown_sec, 30)
+      last_t = Map.get(alarm, :last_triggered)
+      state = Map.get(alarm, :state, "idle")
+      last_t_str = if last_t, do: format_float(last_t), else: "null"
+      ~s({"id":"#{Map.get(alarm, :id, "")}","condition":"#{escape_json(cond_str)}","cooldown_sec":#{cooldown},"last_triggered":#{last_t_str},"state":"#{state}"})
+    end)
     |> Enum.join(",")
     ~s({"type":"alarm_list","alarms":[#{alarm_json}]})
+  end
+
+  def format_response({:alarm_set_ack, id}) do
+    ~s({"type":"ack","command":"alarm_set","id":"#{escape_json(id)}"})
   end
 
   def format_response(:ok), do: ~s({"type":"ack"})
@@ -175,7 +208,11 @@ defmodule Plato.Protocol do
 
   # Helpers
 
-  defp format_float(v) when is_float(v), do: :erlang.float_to_binary(v, [:compact, {decimals, 4}])
+  defp unix_timestamp do
+    :erlang.system_time(:second)
+  end
+
+  defp format_float(v) when is_float(v), do: :erlang.float_to_binary(v, [:compact, decimals: 4])
   defp format_float(v) when is_integer(v), do: "#{v}.0"
 
   defp json_value(v) when is_atom(v), do: ~s("#{v}")
@@ -211,9 +248,8 @@ defmodule Plato.Protocol do
     Plato.Room.update_sensor(room, name, value)
   end
   def execute({:alarm_list, _}, room), do: Plato.Room.get_alarms(room)
-  def execute({:alarm_set, %{id: id, condition: condition, cooldown: cooldown}}, _room) do
-    # Runtime alarm configuration - returns ack
-    {:ok, "alarm_set:#{id}:#{condition}:#{cooldown}"}
+  def execute({:alarm_set, %{id: id, condition: condition, cooldown: cooldown}}, room) do
+    Plato.Room.set_alarm(room, %{id: id, condition: condition, cooldown: cooldown})
   end
   def execute({:subscribe, _}, _room), do: :subscribed
   def execute({:unsubscribe, _}, _room), do: :unsubscribed

@@ -116,21 +116,30 @@ defmodule Plato.RoomTest do
   describe "alarms" do
     test "no alarms initially" do
       {:alarms, alarms} = Room.get_alarms("test_room")
-      assert alarms == []
+      # Alarms exist but should all be idle with no triggers yet
+      for alarm <- alarms do
+        assert alarm.state == "idle"
+        assert alarm.last_triggered == nil
+      end
     end
 
     test "alarm fires when threshold exceeded" do
       :ok = Room.update_sensor("test_room", "temperature", 95.0)
       Room.tick("test_room")
       {:alarms, alarms} = Room.get_alarms("test_room")
-      assert "overheat" in alarms
+      overheat = Enum.find(alarms, &(&1.id == "overheat"))
+      assert overheat != nil
+      assert overheat.state == "active"
+      assert overheat.last_triggered != nil
     end
 
     test "alarm does not fire when value is normal" do
       :ok = Room.update_sensor("test_room", "temperature", 75.0)
       Room.tick("test_room")
       {:alarms, alarms} = Room.get_alarms("test_room")
-      refute "overheat" in alarms
+      overheat = Enum.find(alarms, &(&1.id == "overheat"))
+      assert overheat != nil
+      assert overheat.state == "idle"
     end
 
     test "alarm cooldown prevents immediate re-fire" do
@@ -140,15 +149,17 @@ defmodule Plato.RoomTest do
       # Alarm is active, tick again — should still be in cooldown
       Room.tick("test_room")
       {:alarms, alarms} = Room.get_alarms("test_room")
-      assert "overheat" in alarms
+      overheat = Enum.find(alarms, &(&1.id == "overheat"))
+      assert overheat != nil
+      assert overheat.state == "active"
     end
 
     test "alarm clears after cooldown expires" do
       :ok = Room.update_sensor("test_room", "temperature", 95.0)
       Room.tick("test_room")
 
-      # Tick past the cooldown (default 5)
-      for _ <- 1..10 do
+      # Tick past the cooldown (default 30)
+      for _ <- 1..40 do
         Room.tick("test_room")
       end
 
@@ -157,14 +168,18 @@ defmodule Plato.RoomTest do
       Room.tick("test_room")
 
       {:alarms, alarms} = Room.get_alarms("test_room")
-      refute "overheat" in alarms
+      overheat = Enum.find(alarms, &(&1.id == "overheat"))
+      assert overheat != nil
+      assert overheat.state == "idle"
     end
 
     test "below-threshold alarm fires" do
       :ok = Room.update_sensor("test_room", "pressure", 10.0)
       Room.tick("test_room")
       {:alarms, alarms} = Room.get_alarms("test_room")
-      assert "low_pressure" in alarms
+      low_p = Enum.find(alarms, &(&1.id == "low_pressure"))
+      assert low_p != nil
+      assert low_p.state == "active"
     end
   end
 

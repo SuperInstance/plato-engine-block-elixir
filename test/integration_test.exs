@@ -91,8 +91,8 @@ defmodule Plato.IntegrationTest do
       Fleet.update_sensor("engine", "temperature", 75.0)
       Fleet.update_sensor("engine", "pressure", 14.5)
 
-      # Tick through cooldown period
-      for _ <- 1..15 do
+      # Tick through cooldown period (30 sec default cooldown)
+      for _ <- 1..45 do
         Fleet.broadcast_tick()
       end
 

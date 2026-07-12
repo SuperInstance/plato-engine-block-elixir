@@ -164,14 +164,16 @@ defmodule Plato.Fleet do
       {name, alarms}
     end
 
-    alarm_count = Enum.reduce(all_alarms, 0, fn {_, a}, acc -> acc + length(a) end)
+    active_alarm_count = Enum.reduce(all_alarms, 0, fn {_, a}, acc ->
+      acc + Enum.count(a, fn alarm -> Map.get(alarm, :state) == "active" end)
+    end)
 
     health = %{
       total_rooms: total,
       alive_rooms: alive,
-      total_alarms: alarm_count,
+      total_alarms: active_alarm_count,
       fleet_tick: state.tick_count,
-      status: health_status(alive, total, alarm_count)
+      status: health_status(alive, total, active_alarm_count)
     }
 
     {:reply, {:ok, health}, state}
