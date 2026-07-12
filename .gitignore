@@ -1,8 +1,5 @@
-/target
-**/*.rs.bk
-Cargo.lock
-*.swp
-*.swo
-*~
-.env
-.env.*
+# Elixir
+/_build/
+/deps/
+.elixir_ls/
+*.ez

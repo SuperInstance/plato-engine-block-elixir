@@ -1,5 +1,8 @@
 # Plato Engine Block — Elixir/OTP Implementation
 
+[![CI](https://github.com/SuperInstance/plato-engine-block-elixir/actions/workflows/ci.yml/badge.svg)](https://github.com/SuperInstance/plato-engine-block-elixir/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
 > **"The BEAM VM's actor model IS the Plato thesis."**
 
 This is the Elixir/OTP implementation of the Plato room runtime — a fault-tolerant marine vessel monitoring system where every room is an isolated, supervised process, ternary logic is expressed through pattern matching, and the entire fleet is a supervision tree.
@@ -451,4 +454,4 @@ _build/prod/rel/plato/bin/plato start
 
 ## License
 
-Part of the Plato Engine Block project. See the main repository for license information.
+Apache 2.0 — See [LICENSE](LICENSE) for details.
